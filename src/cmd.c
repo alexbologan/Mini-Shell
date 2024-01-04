@@ -33,7 +33,7 @@ char **convertToList(word_t *head)
 	// Copy strings to the array
 	current = head;
 	for (int i = 1; i < count; i++) {
-		args[i] = get_word(current->string);
+		args[i] = (char *)current->string;
 		current = current->next_word;
 	}
 
@@ -43,7 +43,7 @@ char **convertToList(word_t *head)
 	return args;
 }
 
-char *get_word(word_t *word)
+char *get_word_(word_t *word)
 {
 	word_t *current = word;
 	char *varValue = "";
@@ -59,7 +59,7 @@ char *get_word(word_t *word)
 			}
 		}
 
-		char *newPart = current->string;
+		char *newPart = (char *)current->string;
 		char *temp = malloc(strlen(varValue) + strlen(newPart) + 1);
 		if (temp != NULL) {
 			strcpy(temp, varValue);
@@ -88,10 +88,10 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 		if (s->out != NULL) {
 			if (s->io_flags & IO_OUT_APPEND)
 				// Append to the file
-				fileDescriptor = open(get_word(s->out), O_WRONLY | O_CREAT | O_APPEND, 0644);
+				fileDescriptor = open(get_word_(s->out), O_WRONLY | O_CREAT | O_APPEND, 0644);
 			else
 				// Truncate the file
-				fileDescriptor = open(get_word(s->out), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+				fileDescriptor = open(get_word_(s->out), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 			close(fileDescriptor);
 		}
 		// Change to the specified directory
@@ -103,11 +103,11 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 	}
 
 	if (s->verb->next_part != NULL) {
-		char *varName = s->verb->string;
+		char *varName = (char *)s->verb->string;
 
 		word_t *current = s->verb->next_part->next_part;
 		
-		char *varValue = get_word(current->next_part->next_part);
+		char *varValue = get_word_(current);
 
 		varValue[strlen(varValue)] = '\0';
 		if (setenv(varName, varValue, 1) == -1) {
@@ -126,29 +126,30 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 		if (s->out != NULL) {
 			if (s->io_flags & IO_OUT_APPEND)
 				// Append to the file
-				fileDescriptor = open(get_word(s->out), O_WRONLY | O_CREAT | O_APPEND, 0644);
+				fileDescriptor = open(get_word_(s->out), O_WRONLY | O_CREAT | O_APPEND, 0644);
 			else
 				// Truncate the file
-				fileDescriptor = open(get_word(s->out), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-				// Duplicate the file descriptor to STDOUT_FILENO
-				dup2(fileDescriptor, STDOUT_FILENO);
+				fileDescriptor = open(get_word_(s->out), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+			// Duplicate the file descriptor to STDOUT_FILENO
+			dup2(fileDescriptor, STDOUT_FILENO);
 		}
 
 		if (s->in != NULL) {
-			fileDescriptor = open(get_word(s->in), O_RDONLY);
+			fileDescriptor = open(get_word_(s->in), O_RDONLY);
 
 			// Duplicate the file descriptor to STDIN_FILENO
 			dup2(fileDescriptor, STDIN_FILENO);
 		}
 
 		if (s->err != NULL) {
-			if (!(s->out != NULL && strcmp(get_word(s->out), get_word(s->err)) == 0)) {
+			if (!(s->out != NULL && strcmp(get_word_(s->out), get_word_(s->err)) == 0)) {
 				if (s->io_flags & IO_ERR_APPEND)
 					// Append to the file
-					fileDescriptor = open(get_word(s->err), O_WRONLY | O_CREAT | O_APPEND, 0644);
+					fileDescriptor = open(get_word_(s->err), O_WRONLY | O_CREAT | O_APPEND, 0644);
 				else
 					// Truncate the file
-					fileDescriptor = open(get_word(s->err), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+					fileDescriptor = open(get_word_(s->err), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
 				// Duplicate the file descriptor to STDERR_FILENO
 				dup2(fileDescriptor, STDERR_FILENO);
@@ -162,7 +163,7 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 
 		char **args = convertToList(s->params);
 
-		args[0] = get_word(s->verb);
+		args[0] = get_word_(s->verb);
 
 		if (strcmp(s->verb->string, "pwd") == 0) {
 			// Print the current directory
@@ -187,8 +188,8 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 			}
 		}
 		
-		execvp(get_word(s->verb), args);
-		printf("Execution failed for '%s'\n", get_word(s->verb));
+		execvp(get_word_(s->verb), args);
+		printf("Execution failed for '%s'\n", get_word_(s->verb));
 		exit(EXIT_FAILURE);
 		free(args);
 	} else if (pid < 0) {
