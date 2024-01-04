@@ -34,13 +34,28 @@ char *get_word_(word_t *word)
 		}
 
 		char *newPart = (char *)current->string;
-		char *temp = malloc(strlen(varValue) + strlen(newPart) + 1);
 
+		// Calculate the total length for the new string
+		size_t varValueLength = strlen(varValue);
+		size_t newPartLength = strlen(newPart);
+		size_t totalLength = varValueLength + newPartLength + 1;
+
+		// Allocate memory for the new string
+		char *temp = malloc(totalLength);
+
+		// Check if memory allocation is successful
 		if (temp != NULL) {
-			strncpy(temp, varValue, strlen(varValue) + 1);
-			strcat(temp, newPart);
+			// Copy varValue into temp
+			memcpy(temp, varValue, varValueLength);
+
+			// Copy newPart into temp after varValue
+			memcpy(temp + varValueLength, newPart, newPartLength + 1);
+
+			// Update varValue to point to the newly created string
 			varValue = temp;
 		}
+
+		// Move to the next part
 		current = current->next_part;
 	}
 
@@ -84,7 +99,7 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 	int status = 0;
 	char cwd[1024];
 
-	if (strcmp(s->verb->string, "cd") == 0) {
+	if (strcmp(get_word_(s->verb), "cd") == 0) {
 		int fileDescriptor;
 
 		if (s->out != NULL) {
@@ -177,17 +192,20 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 		}
 
 		execvp(get_word_(s->verb), args);
-		printf("Execution failed for '%s'\n", get_word_(s->verb));
-		exit(EXIT_FAILURE);
+		fprintf(stderr, "%s '%s'\n", "Execution failed for", get_word_(s->verb));
 		free(args);
+		exit(EXIT_FAILURE);
 	} else if (pid < 0) {
 		// Fork failed
-		status = -1;
-	} else {
-		// Parent process. Wait for child to terminate.
-		if (waitpid(pid, &status, 0) != pid)
-			status = -1;
+		perror("Fork failed\n");
+		return -1;
 	}
+	// Parent process. Wait for child to terminate.
+	waitpid(pid, &status, 0);
+	if (WIFEXITED(status))
+		return WEXITSTATUS(status);
+
+	//return -1;
 
 	return status;
 }
@@ -204,8 +222,9 @@ static bool run_in_parallel(command_t *cmd1, command_t *cmd2, int level,
 
 	if (pid1 == 0) {
 		// Child process
-		parse_command(cmd1, level, father);
-		exit(EXIT_SUCCESS);
+		int retValue = parse_command(cmd1, level, father);
+
+		exit(retValue);
 	} else if (pid1 < 0) {
 		// Fork failed
 		exit(EXIT_FAILURE);
@@ -215,8 +234,9 @@ static bool run_in_parallel(command_t *cmd1, command_t *cmd2, int level,
 
 	if (pid2 == 0) {
 		// Child process
-		parse_command(cmd2, level, father);
-		exit(EXIT_SUCCESS);
+		int retValue = parse_command(cmd2, level, father);
+
+		exit(retValue);
 	} else if (pid2 < 0) {
 		// Fork failed
 		exit(EXIT_FAILURE);
@@ -235,21 +255,34 @@ static bool run_in_parallel(command_t *cmd1, command_t *cmd2, int level,
 static bool run_on_pipe(command_t *cmd1, command_t *cmd2, int level,
 													command_t *father)
 {
-	pid_t pid1, pid2;
 	int pipefd[2];
+	pid_t pid1, pid2;
+	int status1 = 0, status2 = 0;
 
-	pipe(pipefd);
+	// Create the pipe
+	if (pipe(pipefd) == -1) {
+		perror("pipe");
+		exit(EXIT_FAILURE);
+	}
 
 	pid1 = fork();
 
 	if (pid1 == 0) {
 		// Child process
-		close(pipefd[READ]);
-		dup2(pipefd[WRITE], STDOUT_FILENO);
-		close(pipefd[WRITE]);
+		// Close the read end of the pipe
+		close(pipefd[0]);
 
-		parse_command(cmd1, level, father);
-		exit(EXIT_SUCCESS);
+		if (dup2(pipefd[1], WRITE) == -1) {
+			close(pipefd[1]);
+			exit(-1);
+		}
+
+		// Afterwards we just run the first command, after it finished running we also close
+		// the second end of the pipe and return the exit value
+		int retValue = parse_command(cmd1, level, father);
+
+		close(pipefd[1]);
+		exit(retValue);
 	} else if (pid1 < 0) {
 		// Fork failed
 		exit(EXIT_FAILURE);
@@ -257,25 +290,33 @@ static bool run_on_pipe(command_t *cmd1, command_t *cmd2, int level,
 
 	pid2 = fork();
 
-	if (pid2 == 0) {
-		// Child process
-		close(pipefd[WRITE]);
-		dup2(pipefd[READ], STDIN_FILENO);
-		close(pipefd[READ]);
-
-		parse_command(cmd2, level, father);
-		exit(EXIT_SUCCESS);
-	} else if (pid2 < 0) {
+	if (pid2 < 0) {
 		// Fork failed
 		exit(EXIT_FAILURE);
+	} else if (pid2 > 0) {
+		close(pipefd[0]);
+		close(pipefd[1]);
+
+		waitpid(pid1, &status1, 0);
+		waitpid(pid2, &status2, 0);
+
+		if (WIFEXITED(status2))
+			return WEXITSTATUS(status2);
+
+		return 1;
 	}
 
-	close(pipefd[READ]);
-	close(pipefd[WRITE]);
+	close(pipefd[1]);
 
-	// Parent process waits for both children
-	waitpid(pid1, NULL, 0);
-	waitpid(pid2, NULL, 0);
+	if (dup2(pipefd[0], READ) == -1) {
+		close(pipefd[0]);
+		exit(-1);
+	}
+
+	int retValue = parse_command(cmd2, level, father);
+
+	close(pipefd[0]);
+	exit(retValue);
 
 	return true;
 }
@@ -285,12 +326,9 @@ static bool run_on_pipe(command_t *cmd1, command_t *cmd2, int level,
  */
 int parse_command(command_t *c, int level, command_t *father)
 {
+	int retValue = 0;
 	// Perform sanity checks before executing the command
-	if (c == NULL)
-		// Handle NULL command
-		return SHELL_EXIT;
-
-	if (c->op == OP_NONE && c->scmd == NULL)
+	if (c == NULL || (c->op == OP_NONE && c->scmd == NULL))
 		// Handle NULL simple command
 		return SHELL_EXIT;
 
@@ -299,33 +337,36 @@ int parse_command(command_t *c, int level, command_t *father)
 		// Execute a simple command.
 		if (!strcmp(c->scmd->verb->string, "exit") || !strcmp(c->scmd->verb->string, "quit"))
 			return SHELL_EXIT;
-		else
-			return parse_simple(c->scmd, level, father);
+		retValue = parse_simple(c->scmd, level, c);
+		break;
 	case OP_SEQUENTIAL:
 		// Execute the commands one after the other.
-		parse_command(c->cmd1, level, father);
-		return parse_command(c->cmd2, level, father);
+		retValue = parse_command(c->cmd1, level, c);
+		retValue |= parse_command(c->cmd2, level, c);
+		break;
 	case OP_PARALLEL:
 		// Execute the commands simultaneously.
-		run_in_parallel(c->cmd1, c->cmd2, level, father);
+		retValue = run_in_parallel(c->cmd1, c->cmd2, level, c);
 		break;
 	case OP_CONDITIONAL_NZERO:
 		// Execute the second command only if the first one returns non zero.
-		if (parse_command(c->cmd1, level, father) != 0)
-			return parse_command(c->cmd2, level, father);
+		retValue = parse_command(c->cmd1, level, c);
+		if (retValue != 0)
+			retValue = parse_command(c->cmd2, level, c);
 		break;
 	case OP_CONDITIONAL_ZERO:
 		// Execute the second command only if the first one returns zero.
-		if (parse_command(c->cmd1, level, father) == 0)
-			return parse_command(c->cmd2, level, father);
+		retValue = parse_command(c->cmd1, level, c);
+		if (retValue == 0)
+			retValue = parse_command(c->cmd2, level, c);
 		break;
 	case OP_PIPE:
 		// Redirect the output of the first command to the input of the second.
-		run_on_pipe(c->cmd1, c->cmd2, level, father);
+		retValue = run_on_pipe(c->cmd1, c->cmd2, level, c);
 		break;
 	default:
 		return SHELL_EXIT;
 	}
 
-	return 0;
+	return retValue;
 }
