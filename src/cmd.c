@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <linux/limits.h>
 #include <string.h>
 
 #include "cmd.h"
@@ -37,7 +38,7 @@ char *get_word_(word_t *word)
 		char *temp = malloc(strlen(varValue) + strlen(newPart) + 1);
 
 		if (temp != NULL) {
-			strcpy(temp, varValue);
+			strscpy(temp, varValue, strlen(varValue) + 1);
 			strcat(temp, newPart);
 			varValue = temp;
 		}
