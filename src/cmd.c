@@ -16,6 +16,37 @@
 #define READ		0
 #define WRITE		1
 
+
+char *get_word_(word_t *word)
+{
+	word_t *current = word;
+	char *varValue = "";
+
+	while (current != NULL) {
+		if (current->expand) {
+			// Expand the environment variable
+			char *varValue = getenv(current->string);
+
+			if (varValue != NULL)
+				current->string = varValue;
+			else
+				current->string = "";
+		}
+
+		char *newPart = (char *)current->string;
+		char *temp = malloc(strlen(varValue) + strlen(newPart) + 1);
+
+		if (temp != NULL) {
+			strcpy(temp, varValue);
+			strcat(temp, newPart);
+			varValue = temp;
+		}
+		current = current->next_part;
+	}
+
+	return varValue;
+}
+
 char **convertToList(word_t *head)
 {
 	int count = 0;
@@ -33,7 +64,7 @@ char **convertToList(word_t *head)
 	// Copy strings to the array
 	current = head;
 	for (int i = 1; i < count; i++) {
-		args[i] = (char *)current->string;
+		args[i] = get_word_(current);
 		current = current->next_word;
 	}
 
@@ -41,35 +72,6 @@ char **convertToList(word_t *head)
 	args[count] = NULL;
 
 	return args;
-}
-
-char *get_word_(word_t *word)
-{
-	word_t *current = word;
-	char *varValue = "";
-	while (current != NULL) {
-		if (current->expand) {
-			// Expand the environment variable
-			char *varValue = getenv(current->string);
-
-			if (varValue != NULL) {
-				current->string = varValue;
-			} else {
-				current->string = "";
-			}
-		}
-
-		char *newPart = (char *)current->string;
-		char *temp = malloc(strlen(varValue) + strlen(newPart) + 1);
-		if (temp != NULL) {
-			strcpy(temp, varValue);
-			strcat(temp, newPart);
-			varValue = temp;
-		}
-		current = current->next_part;
-	}
-
-	return varValue;
 }
 
 /**
@@ -95,7 +97,7 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 			close(fileDescriptor);
 		}
 		// Change to the specified directory
-		if (s->params != NULL && chdir(s->params->string) == -1) {
+		if (s->params != NULL && chdir(get_word_(s->params)) == -1) {
 			perror("chdir");
 			return -1;
 		}
@@ -104,9 +106,7 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 
 	if (s->verb->next_part != NULL) {
 		char *varName = (char *)s->verb->string;
-
 		word_t *current = s->verb->next_part->next_part;
-		
 		char *varValue = get_word_(current);
 
 		varValue[strlen(varValue)] = '\0';
@@ -116,7 +116,7 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 			return -1;
 		}
 		return 0;
-    }
+	}
 
 	pid = fork();
 	if (pid == 0) {
@@ -165,7 +165,7 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 
 		args[0] = get_word_(s->verb);
 
-		if (strcmp(s->verb->string, "pwd") == 0) {
+		if (strcmp(get_word_(s->verb), "pwd") == 0) {
 			// Print the current directory
 			if (getcwd(cwd, sizeof(cwd)) != NULL) {
 				printf("%s\n", cwd);
@@ -176,18 +176,6 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 			exit(EXIT_SUCCESS); // Exit the child process after printing directory
 		}
 
-		if (s->params != NULL && s->params->expand) {
-			// Expand the environment variable
-			char *varValue = getenv(s->params->string);
-
-			if (varValue != NULL) {
-				args[1] = varValue;
-				args[2] = NULL;
-			} else {
-				args[1] = NULL;
-			}
-		}
-		
 		execvp(get_word_(s->verb), args);
 		printf("Execution failed for '%s'\n", get_word_(s->verb));
 		exit(EXIT_FAILURE);
@@ -259,7 +247,7 @@ static bool run_on_pipe(command_t *cmd1, command_t *cmd2, int level,
 		close(pipefd[READ]);
 		dup2(pipefd[WRITE], STDOUT_FILENO);
 		close(pipefd[WRITE]);
-	
+
 		parse_command(cmd1, level, father);
 		exit(EXIT_SUCCESS);
 	} else if (pid1 < 0) {
