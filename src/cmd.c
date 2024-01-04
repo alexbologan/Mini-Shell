@@ -187,7 +187,7 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 			}
 		}
 		
-		//execvp(get_word(s->verb), args);
+		execvp(get_word(s->verb), args);
 		printf("Execution failed for '%s'\n", get_word(s->verb));
 		exit(EXIT_FAILURE);
 		free(args);
