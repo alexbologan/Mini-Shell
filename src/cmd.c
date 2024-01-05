@@ -119,12 +119,10 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 		return 0;
 	}
 
-	if (s->verb->next_part != NULL) {
+	if (strchr(get_word_(s->verb), '=') != 0) {
 		char *varName = (char *)s->verb->string;
-		word_t *current = s->verb->next_part->next_part;
-		char *varValue = get_word_(current);
+		char *varValue = get_word_(s->verb->next_part->next_part);
 
-		varValue[strlen(varValue)] = '\0';
 		if (setenv(varName, varValue, 1) == -1) {
 			perror("setenv");
 
