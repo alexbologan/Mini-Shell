@@ -32,12 +32,14 @@ char *get_word_(word_t *word)
 				current->string = varValue;
 			else
 				current->string = "";
+
+			free(varValue);
 		}
 
 		char *newPart = (char *)current->string;
 
 		// Calculate the total length for the new string
-		size_t varValueLength = strlen(varValue);
+		size_t varValueLength = (varValue != NULL) ? strlen(varValue) : 0;
 		size_t newPartLength = strlen(newPart);
 		size_t totalLength = varValueLength + newPartLength + 1;
 
@@ -47,16 +49,19 @@ char *get_word_(word_t *word)
 		// Check if memory allocation is successful
 		if (temp != NULL) {
 			// Copy varValue into temp
-			memcpy(temp, varValue, varValueLength);
+			if (varValue != NULL)
+				memcpy(temp, varValue, varValueLength);
 
 			// Copy newPart into temp after varValue
 			memcpy(temp + varValueLength, newPart, newPartLength + 1);
 
 			// Update varValue to point to the newly created string
+			free(varValue);  // Free the previous string if any
 			varValue = temp;
-
-			// Free the memory allocated for temp
-			free(temp);
+		} else {
+			// Memory allocation failed
+			free(varValue);
+			return NULL;
 		}
 
 		// Move to the next part
@@ -93,6 +98,17 @@ char **convertToList(word_t *head)
 	return args;
 }
 
+// Get the size of an array of strings
+int getArraySize(char **array)
+{
+	int count = 0;
+
+	while (array[count] != NULL)
+		count++;
+
+	return count;
+}
+
 /**
  * Parse a simple command (internal, environment variable assignment,
  * external command).
@@ -102,8 +118,11 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 	pid_t pid;
 	int status = 0;
 	char cwd[1024];
+	char *comm = get_word(s->verb);
 
-	if (strcmp(get_word(s->verb), "cd") == 0) {
+	if (strcmp(comm, "cd") == 0) {
+		free(comm);
+		free(s->verb);
 		if (s->out != NULL) {
 			int fileDescriptor;
 
@@ -147,9 +166,11 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 	pid = fork();
 	if (pid == 0) {
 		// Child process
+		// Redirect input, output and error
 		int fileDescriptor = -1;
 		char *inFile = get_word(s->in);
 
+		// Redirect input
 		if (inFile != NULL) {
 			fileDescriptor = open(inFile, O_RDONLY);
 
@@ -160,10 +181,12 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 			}
 		}
 
+		// Redirect output and error
 		char *outFile = get_word(s->out);
 		char *errFile = get_word(s->err);
 
 		if (errFile != NULL && outFile != NULL && strcmp(errFile, outFile) == 0) {
+			// Redirect both output and error to the same file
 			if (s->io_flags == IO_REGULAR) {
 				// Truncate the file
 				fileDescriptor = open(errFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -188,6 +211,7 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 				}
 			}
 		} else {
+			// Redirect output and error to different files
 			if (outFile != NULL) {
 				if (s->io_flags == IO_OUT_APPEND) {
 					// Append to the file
@@ -237,30 +261,41 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 			}
 		}
 
+		// Free the memory allocated for the strings
 		free(inFile);
 		free(outFile);
 		free(errFile);
 
-		char **args = convertToList(s->params);
-
-		args[0] = get_word_(s->verb);
-
+		// Check if the command is pwd and print the current directory
 		if (strcmp(get_word_(s->verb), "pwd") == 0) {
 			// Print the current directory
 			if (getcwd(cwd, sizeof(cwd)) != NULL) {
 				printf("%s\n", cwd);
 			} else {
+				// Print the error message
 				perror("getcwd");
 				exit(EXIT_FAILURE);
 			}
 			exit(EXIT_SUCCESS); // Exit the child process after printing directory
 		}
 
+		// Convert the linked list to an array of strings of arguments
+		char **args = convertToList(s->params);
+
+		// The first argument is the command
+		args[0] = get_word_(s->verb);
+
+		// Execute the command
 		execvp(get_word_(s->verb), args);
+
+		// Close the file descriptor if it is still open
 		if (fileDescriptor != -1)
 			close(fileDescriptor);
+
 		fprintf(stderr, "%s '%s'\n", "Execution failed for", get_word_(s->verb));
-		free(args);
+		for (int i = 0; i < getArraySize(args); i++)
+			free(args[i]);  // Free each string
+		free(args);  // Free the array of strings
 		exit(EXIT_FAILURE);
 	} else if (pid < 0) {
 		// Fork failed
@@ -269,6 +304,7 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 	}
 	// Parent process. Wait for child to terminate.
 	waitpid(pid, &status, 0);
+	// Check if the child process exited normally
 	if (WIFEXITED(status))
 		return WEXITSTATUS(status);
 
@@ -342,8 +378,7 @@ static bool run_on_pipe(command_t *cmd1, command_t *cmd2, int level,
 			exit(-1);
 		}
 
-		// Afterwards we just run the first command, after it finished running we also close
-		// the second end of the pipe and return the exit value
+		// Execute the first command
 		int retValue = parse_command(cmd1, level, father);
 
 		close(pipefd[1]);
@@ -362,13 +397,13 @@ static bool run_on_pipe(command_t *cmd1, command_t *cmd2, int level,
 		close(pipefd[0]);
 		close(pipefd[1]);
 
+		// Wait for both children
 		waitpid(pid1, &status1, 0);
 		waitpid(pid2, &status2, 0);
 
+		// Check if the child processes exited normally
 		if (WIFEXITED(status2))
 			return WEXITSTATUS(status2);
-
-		return 1;
 	}
 
 	close(pipefd[1]);
@@ -378,6 +413,7 @@ static bool run_on_pipe(command_t *cmd1, command_t *cmd2, int level,
 		exit(-1);
 	}
 
+	// Execute the second command
 	int retValue = parse_command(cmd2, level, father);
 
 	close(pipefd[0]);
