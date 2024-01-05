@@ -122,21 +122,22 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 
 	if (strcmp(comm, "cd") == 0) {
 		free(comm);
-		free(s->verb);
 		if (s->out != NULL) {
-			int fileDescriptor;
+			int fileDescriptor = -1;
 
 			if (s->io_flags & IO_OUT_APPEND) {
 				// Append to the file
-				fileDescriptor = open(get_word_(s->out), O_WRONLY | O_CREAT | O_APPEND, 0644);
-				if ((fileDescriptor) == -1) {
+				fileDescriptor = open(get_word_(s->out),
+										O_WRONLY | O_CREAT | O_APPEND, 0644);
+				if (fileDescriptor == -1) {
 					close(fileDescriptor);
 					return -1;
 				}
 			} else {
 				// Truncate the file
-				fileDescriptor = open(get_word_(s->out), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-				if ((fileDescriptor) == -1) {
+				fileDescriptor = open(get_word_(s->out),
+										O_WRONLY | O_CREAT | O_TRUNC, 0644);
+				if (fileDescriptor == -1) {
 					close(fileDescriptor);
 					return -1;
 				}
@@ -174,7 +175,7 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 		if (inFile != NULL) {
 			fileDescriptor = open(inFile, O_RDONLY);
 
-			if ((fileDescriptor) == -1 || dup2((fileDescriptor), READ) == -1) {
+			if (fileDescriptor == -1 || dup2(fileDescriptor, READ) == -1) {
 				close(fileDescriptor);
 				free(inFile);
 				exit(-1);
@@ -191,7 +192,8 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 				// Truncate the file
 				fileDescriptor = open(errFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
-				if ((fileDescriptor) == -1 || dup2((fileDescriptor), WRITE) == -1 || dup2((fileDescriptor), ERR) == -1) {
+				if (fileDescriptor == -1 || dup2(fileDescriptor, WRITE) == -1
+												|| dup2(fileDescriptor, ERR) == -1) {
 					close(fileDescriptor);
 					free(inFile);
 					free(outFile);
@@ -202,7 +204,8 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 				// Append to the file
 				fileDescriptor = open(errFile, O_WRONLY | O_CREAT | O_APPEND, 0644);
 
-				if ((fileDescriptor) == -1 || dup2((fileDescriptor), WRITE) == -1 || dup2((fileDescriptor), ERR) == -1) {
+				if (fileDescriptor == -1 || dup2(fileDescriptor, WRITE) == -1
+												|| dup2(fileDescriptor, ERR) == -1) {
 					close(fileDescriptor);
 					free(inFile);
 					free(outFile);
@@ -216,7 +219,7 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 				if (s->io_flags == IO_OUT_APPEND) {
 					// Append to the file
 					fileDescriptor = open(outFile, O_WRONLY | O_CREAT | O_APPEND, 0644);
-					if ((fileDescriptor) == -1 || dup2((fileDescriptor), WRITE) == -1) {
+					if (fileDescriptor == -1 || dup2(fileDescriptor, WRITE) == -1) {
 						close(fileDescriptor);
 						free(inFile);
 						free(outFile);
@@ -226,7 +229,7 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 				} else {
 					// Truncate the file
 					fileDescriptor = open(outFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-					if ((fileDescriptor) == -1 || dup2((fileDescriptor), WRITE) == -1) {
+					if (fileDescriptor == -1 || dup2(fileDescriptor, WRITE) == -1) {
 						close(fileDescriptor);
 						free(inFile);
 						free(outFile);
@@ -240,7 +243,7 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 				if (s->io_flags == IO_ERR_APPEND) {
 					// Append to the file
 					fileDescriptor = open(errFile, O_WRONLY | O_CREAT | O_APPEND, 0644);
-					if ((fileDescriptor) == -1 || dup2((fileDescriptor), ERR) == -1) {
+					if (fileDescriptor == -1 || dup2(fileDescriptor, ERR) == -1) {
 						close(fileDescriptor);
 						free(inFile);
 						free(outFile);
@@ -250,7 +253,7 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 				} else {
 					// Truncate the file
 					fileDescriptor = open(errFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-					if ((fileDescriptor) == -1 || dup2((fileDescriptor), ERR) == -1) {
+					if (fileDescriptor == -1 || dup2(fileDescriptor, ERR) == -1) {
 						close(fileDescriptor);
 						free(inFile);
 						free(outFile);
@@ -436,7 +439,8 @@ int parse_command(command_t *c, int level, command_t *father)
 	switch (c->op) {
 	case OP_NONE:
 		// Execute a simple command.
-		if (!strcmp(c->scmd->verb->string, "exit") || !strcmp(c->scmd->verb->string, "quit"))
+		if (!strcmp(c->scmd->verb->string, "exit")
+								|| !strcmp(c->scmd->verb->string, "quit"))
 			return SHELL_EXIT;
 		retValue = parse_simple(c->scmd, level, c);
 		break;
