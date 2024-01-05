@@ -103,18 +103,18 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 	int status = 0;
 	char cwd[1024];
 
-	if (strcmp(get_word_(s->verb), "cd") == 0) {
-		int fileDescriptor;
-
+	if (strcmp(get_word(s->verb), "cd") == 0) {
 		if (s->out != NULL) {
-			if (s->io_flags == IO_OUT_APPEND) {
+			int fileDescriptor;
+
+			if (s->io_flags & IO_OUT_APPEND) {
 				// Append to the file
 				fileDescriptor = open(get_word_(s->out), O_WRONLY | O_CREAT | O_APPEND, 0644);
 				if ((fileDescriptor) == -1) {
 					close(fileDescriptor);
 					return -1;
 				}
-			} else if (s->io_flags == IO_REGULAR) {
+			} else {
 				// Truncate the file
 				fileDescriptor = open(get_word_(s->out), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 				if ((fileDescriptor) == -1) {
@@ -126,12 +126,8 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 		// Change to the specified directory
 		if (s->params != NULL && chdir(get_word_(s->params)) == -1) {
 			perror("chdir");
-			if (fileDescriptor != -1)
-				close(fileDescriptor);
 			return -1;
 		}
-		if (fileDescriptor != -1)
-			close(fileDescriptor);
 		return 0;
 	}
 
@@ -151,72 +147,100 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 	pid = fork();
 	if (pid == 0) {
 		// Child process
-		int fileDescriptor;
+		int fileDescriptor = -1;
+		char *inFile = get_word(s->in);
 
-		if (s->in != NULL) {
-			fileDescriptor = open(get_word_(s->in), O_RDONLY);
+		if (inFile != NULL) {
+			fileDescriptor = open(inFile, O_RDONLY);
 
 			if ((fileDescriptor) == -1 || dup2((fileDescriptor), READ) == -1) {
 				close(fileDescriptor);
+				free(inFile);
 				exit(-1);
 			}
 		}
 
-		if (s->err != NULL && s->out != NULL && strcmp(get_word_(s->out), get_word_(s->err)) == 0) {
+		char *outFile = get_word(s->out);
+		char *errFile = get_word(s->err);
+
+		if (errFile != NULL && outFile != NULL && strcmp(errFile, outFile) == 0) {
 			if (s->io_flags == IO_REGULAR) {
 				// Truncate the file
-				fileDescriptor = open(get_word_(s->out), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+				fileDescriptor = open(errFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 
 				if ((fileDescriptor) == -1 || dup2((fileDescriptor), WRITE) == -1 || dup2((fileDescriptor), ERR) == -1) {
 					close(fileDescriptor);
+					free(inFile);
+					free(outFile);
+					free(errFile);
 					exit(-1);
 				}
 			} else if (s->io_flags == IO_OUT_APPEND) {
 				// Append to the file
-				fileDescriptor = open(get_word_(s->out), O_WRONLY | O_CREAT | O_APPEND, 0644);
+				fileDescriptor = open(errFile, O_WRONLY | O_CREAT | O_APPEND, 0644);
 
 				if ((fileDescriptor) == -1 || dup2((fileDescriptor), WRITE) == -1 || dup2((fileDescriptor), ERR) == -1) {
 					close(fileDescriptor);
+					free(inFile);
+					free(outFile);
+					free(errFile);
 					exit(-1);
 				}
 			}
 		} else {
-			if (s->out != NULL) {
+			if (outFile != NULL) {
 				if (s->io_flags == IO_OUT_APPEND) {
 					// Append to the file
-					fileDescriptor = open(get_word_(s->out), O_WRONLY | O_CREAT | O_APPEND, 0644);
+					fileDescriptor = open(outFile, O_WRONLY | O_CREAT | O_APPEND, 0644);
 					if ((fileDescriptor) == -1 || dup2((fileDescriptor), WRITE) == -1) {
 						close(fileDescriptor);
+						free(inFile);
+						free(outFile);
+						free(errFile);
 						exit(-1);
 					}
-				} else if (s->io_flags == IO_REGULAR) {
+				} else {
 					// Truncate the file
-					fileDescriptor = open(get_word_(s->out), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+					fileDescriptor = open(outFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 					if ((fileDescriptor) == -1 || dup2((fileDescriptor), WRITE) == -1) {
 						close(fileDescriptor);
+						free(inFile);
+						free(outFile);
+						free(errFile);
 						exit(-1);
 					}
 				}
 			}
 
-			if (s->err != NULL) {
+			if (errFile != NULL) {
 				if (s->io_flags == IO_ERR_APPEND) {
 					// Append to the file
-					fileDescriptor = open(get_word_(s->err), O_WRONLY | O_CREAT | O_APPEND, 0644);
+					fileDescriptor = open(errFile, O_WRONLY | O_CREAT | O_APPEND, 0644);
 					if ((fileDescriptor) == -1 || dup2((fileDescriptor), ERR) == -1) {
 						close(fileDescriptor);
+						free(inFile);
+						free(outFile);
+						free(errFile);
 						exit(-1);
 					}
-				} else if (s->io_flags == IO_REGULAR) {
+				} else {
 					// Truncate the file
-					fileDescriptor = open(get_word_(s->err), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+					fileDescriptor = open(errFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
 					if ((fileDescriptor) == -1 || dup2((fileDescriptor), ERR) == -1) {
 						close(fileDescriptor);
+						free(inFile);
+						free(outFile);
+						free(errFile);
 						exit(-1);
 					}
 				}
 			}
 		}
+
+		free(inFile);
+		free(outFile);
+		free(errFile);
+
 		char **args = convertToList(s->params);
 
 		args[0] = get_word_(s->verb);
@@ -233,10 +257,8 @@ static int parse_simple(simple_command_t *s, int level, command_t *father)
 		}
 
 		execvp(get_word_(s->verb), args);
-
 		if (fileDescriptor != -1)
 			close(fileDescriptor);
-
 		fprintf(stderr, "%s '%s'\n", "Execution failed for", get_word_(s->verb));
 		free(args);
 		exit(EXIT_FAILURE);
